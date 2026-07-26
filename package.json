@@ -1,0 +1,27 @@
+{
+  "name": "lorcana-seller-csv",
+  "version": "1.0.0",
+  "description": "Browse Lorcana sets, price cards by avg of last 3 sold, and export a TCGplayer Seller Portal inventory CSV",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "ts-node src/server.ts"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "better-sqlite3": "^12.9.0",
+    "express": "^4.21.0",
+    "multer": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^4.17.21",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.7.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  }
+}
