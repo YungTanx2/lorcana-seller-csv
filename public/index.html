@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lorcana Seller CSV Builder</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
+    background: #0f1720; color: #e6edf3; line-height: 1.45; }
+  header { padding: 20px; border-bottom: 1px solid #23303d; background: linear-gradient(135deg, #142433, #0f1720);
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+  h1 { margin: 0; font-size: 1.3rem; }
+  .sub { color: #93a4b3; font-size: .82rem; margin-top: 2px; }
+  .wrap { max-width: 1300px; margin: 0 auto; padding: 20px; }
+  .panel { background: #16222e; border: 1px solid #23303d; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  select, input[type=text], input[type=number] { background: #0f1720; border: 1px solid #2a3b4c; color: #e6edf3;
+    border-radius: 6px; padding: 7px 10px; font-size: .88rem; }
+  input[type=number] { width: 64px; text-align: right; }
+  button { background: #1b2a38; border: 1px solid #2a3b4c; color: #cfe0ee; border-radius: 6px;
+    padding: 7px 14px; font-size: .85rem; font-weight: 600; cursor: pointer; }
+  button:hover { background: #24384a; color: #6cc7ff; }
+  button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  button.primary:hover { background: #2a7bfa; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; background: #1b2a38; border: 1px solid #2a3b4c;
+    border-radius: 999px; padding: 4px 11px; font-size: .8rem; cursor: pointer; user-select: none; }
+  .chip input { accent-color: #1f6feb; }
+  .chip.off { opacity: .4; }
+  label.field { display: flex; flex-direction: column; gap: 3px; font-size: .78rem; color: #93a4b3; }
+  .filters-group { display: flex; flex-direction: column; gap: 8px; }
+  .filters-title { font-size: .75rem; color: #7d90a0; text-transform: uppercase; letter-spacing: .04em; }
+  table { width: 100%; border-collapse: collapse; font-size: .87rem; }
+  thead th { position: sticky; top: 0; background: #16222e; text-align: left; padding: 9px 10px;
+    font-weight: 600; color: #a9bccc; border-bottom: 1px solid #2a3b4c; white-space: nowrap; z-index: 2; }
+  tbody td { padding: 7px 10px; border-bottom: 1px solid #1b2731; vertical-align: middle; }
+  tbody tr:hover { background: #14202b; }
+  .thumb { width: 40px; height: 56px; object-fit: contain; border-radius: 4px; background: #0b131b; display: block; }
+  .cname { font-weight: 600; }
+  .printing-badge { font-size: .68rem; padding: 2px 7px; border-radius: 999px; background: #23303d; color: #9fb3c2; }
+  .price-ok { color: #6ee7a8; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .price-bad { color: #6b7d8c; font-size: .78rem; }
+  .sales-n { color: #7d90a0; font-size: .74rem; }
+  .progress-wrap { height: 6px; background: #0f1720; border-radius: 999px; overflow: hidden; margin-top: 8px; }
+  .progress-bar { height: 100%; background: #1f6feb; width: 0%; transition: width .2s; }
+  .status-text { font-size: .8rem; color: #93a4b3; }
+  .tablewrap { overflow: auto; max-height: 70vh; border: 1px solid #23303d; border-radius: 10px; }
+  .empty { color: #7d90a0; text-align: center; padding: 40px 20px; }
+  .excluded-panel { background: #241a12; border: 1px solid #4a3018; border-radius: 10px; padding: 14px 16px; margin-top: 14px; }
+  .excluded-panel h3 { margin: 0 0 8px; font-size: .9rem; color: #f0b26b; }
+  .excluded-panel li { font-size: .82rem; margin-bottom: 3px; }
+  .badge-count { background: #1f6feb; color: #fff; border-radius: 999px; font-size: .7rem; padding: 1px 7px; margin-left: 4px; }
+  @media (prefers-color-scheme: light) {
+    body { background: #f7f9fb; color: #1a2530; }
+    header { background: linear-gradient(135deg, #e8f1f9, #f7f9fb); border-color: #dae3ea; }
+    .sub { color: #5a6b78; }
+    .panel { background: #fff; border-color: #e0e8ef; }
+    select, input[type=text], input[type=number] { background: #f4f7fa; border-color: #cdd9e2; color: #1a2530; }
+    button { background: #eaf2f9; border-color: #d3e0ea; color: #274355; }
+    .chip { background: #eaf2f9; border-color: #d3e0ea; }
+    thead th { background: #eef4f9; color: #45606f; border-color: #d3e0ea; }
+    tbody td { border-color: #e7edf2; } tbody tr:hover { background: #eef5fb; }
+    .thumb { background: #eef2f6; }
+    .price-ok { color: #12905a; }
+    .tablewrap { border-color: #dae3ea; }
+    .excluded-panel { background: #fff3e6; border-color: #f0c896; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Lorcana Seller CSV Builder</h1>
+    <div class="sub">Browse sets, price by avg of last 3 sold, export a TCGplayer Seller Portal inventory CSV</div>
+  </div>
+  <div class="row">
+    <button id="importBtn">Import seller dump…</button>
+    <input id="fileInput" type="file" accept=".csv" style="display:none">
+    <button id="exportBtn" class="primary">Export CSV</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="panel" id="setPanel">
+    <div class="row">
+      <label class="field">Set
+        <select id="setSelect"><option value="">Loading sets…</option></select>
+      </label>
+      <div class="filters-group">
+        <div class="filters-title">Rarity</div>
+        <div class="row" id="rarityChips"></div>
+      </div>
+      <div class="filters-group">
+        <div class="filters-title">Printing</div>
+        <div class="row" id="printingChips"></div>
+      </div>
+      <label class="field">Search
+        <input id="searchInput" type="text" placeholder="Filter by name…">
+      </label>
+    </div>
+    <div id="progressWrap" style="display:none">
+      <div class="status-text" id="progressText"></div>
+      <div class="progress-wrap"><div class="progress-bar" id="progressBar"></div></div>
+    </div>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr>
+          <th></th><th>Card</th><th>#</th><th>Rarity</th><th>Printing</th>
+          <th style="text-align:right">Avg (last 3)</th><th>Sales</th><th>Qty</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"><tr><td colspan="8" class="empty">Import a seller dump to get started.</td></tr></tbody>
+    </table>
+  </div>
+
+  <div id="excludedPanel" style="display:none"></div>
+</div>
+
+<script>
+const RARITIES = ['Common','Uncommon','Rare','Super Rare','Legendary','Epic','Iconic','Enchanted'];
+const PRINTINGS = ['Normal','Cold Foil','Holofoil'];
+
+let currentSet = '';
+let currentCards = [];        // full unfiltered card list for the current set
+let activeRarities = new Set(RARITIES);
+let activePrintings = new Set(PRINTINGS);
+
+const setSelect = document.getElementById('setSelect');
+const tbody = document.getElementById('tbody');
+const rarityChips = document.getElementById('rarityChips');
+const printingChips = document.getElementById('printingChips');
+const searchInput = document.getElementById('searchInput');
+const progressWrap = document.getElementById('progressWrap');
+const progressBar = document.getElementById('progressBar');
+const progressText = document.getElementById('progressText');
+const excludedPanel = document.getElementById('excludedPanel');
+
+function buildChips(container, values, activeSet, onToggle) {
+  container.innerHTML = '';
+  for (const v of values) {
+    const label = document.createElement('label');
+    label.className = 'chip' + (activeSet.has(v) ? '' : ' off');
+    label.innerHTML = `<input type="checkbox" ${activeSet.has(v) ? 'checked' : ''}> ${v}`;
+    label.querySelector('input').addEventListener('change', (e) => {
+      if (e.target.checked) activeSet.add(v); else activeSet.delete(v);
+      label.classList.toggle('off', !e.target.checked);
+      onToggle();
+    });
+    container.appendChild(label);
+  }
+}
+buildChips(rarityChips, RARITIES, activeRarities, renderTable);
+buildChips(printingChips, PRINTINGS, activePrintings, renderTable);
+searchInput.addEventListener('input', renderTable);
+
+async function loadSets() {
+  const sets = await (await fetch('/api/sets')).json();
+  setSelect.innerHTML = sets.length
+    ? sets.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('')
+    : '<option value="">No sets imported yet</option>';
+  if (sets.length) {
+    currentSet = sets[0];
+    setSelect.value = currentSet;
+    await loadSetCards();
+  }
+}
+
+setSelect.addEventListener('change', async () => {
+  currentSet = setSelect.value;
+  if (currentSet) await loadSetCards();
+});
+
+async function loadSetCards() {
+  const res = await fetch(`/api/cards?set=${encodeURIComponent(currentSet)}`);
+  currentCards = await res.json();
+  renderTable();
+  streamPricing();
+}
+
+function streamPricing() {
+  progressWrap.style.display = '';
+  progressBar.style.width = '0%';
+  progressText.textContent = 'Checking prices…';
+
+  const src = new EventSource(`/api/price-set?set=${encodeURIComponent(currentSet)}`);
+  src.onmessage = async (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'start') {
+      progressText.textContent = `Pricing ${msg.total} cards…`;
+    } else if (msg.type === 'progress') {
+      const pct = msg.total ? Math.round((msg.done / msg.total) * 100) : 100;
+      progressBar.style.width = pct + '%';
+      progressText.textContent = `Pricing ${msg.done}/${msg.total}…`;
+    } else if (msg.type === 'done') {
+      progressText.textContent = 'Prices up to date.';
+      progressBar.style.width = '100%';
+      src.close();
+      const res = await fetch(`/api/cards?set=${encodeURIComponent(currentSet)}`);
+      currentCards = await res.json();
+      renderTable();
+      setTimeout(() => { progressWrap.style.display = 'none'; }, 1500);
+    } else if (msg.type === 'error') {
+      progressText.textContent = 'Error: ' + msg.message;
+      src.close();
+    }
+  };
+  src.onerror = () => { progressText.textContent = 'Connection lost.'; src.close(); };
+}
+
+function renderTable() {
+  const q = searchInput.value.trim().toLowerCase();
+  const rows = currentCards.filter((c) =>
+    activeRarities.has(c.rarity) &&
+    activePrintings.has(c.printing) &&
+    (!q || c.productName.toLowerCase().includes(q))
+  );
+
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">No cards match the current filters.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows.map((c) => {
+    const price = c.price;
+    let priceCell, salesCell;
+    if (price && price.qualifies) {
+      priceCell = `<span class="price-ok">$${price.avgLast3.toFixed(2)}</span>`;
+      salesCell = `<span class="sales-n">${price.salesCount} sales</span>`;
+    } else if (price && price.computedAt) {
+      priceCell = `<span class="price-bad">not listed</span>`;
+      salesCell = `<span class="sales-n">${price.salesCount || 0} sales</span>`;
+    } else {
+      priceCell = `<span class="price-bad">—</span>`;
+      salesCell = '';
+    }
+    return `
+      <tr data-sku="${c.skuId}">
+        <td><img class="thumb" loading="lazy" src="${escapeHtml(c.photoUrl)}" alt=""></td>
+        <td class="cname">${escapeHtml(c.productName)}</td>
+        <td>${escapeHtml(c.number)}</td>
+        <td>${escapeHtml(c.rarity)}</td>
+        <td><span class="printing-badge">${escapeHtml(c.printing)}</span></td>
+        <td style="text-align:right">${priceCell}</td>
+        <td>${salesCell}</td>
+        <td><input type="number" min="0" step="1" class="qty-input" data-sku="${c.skuId}" value="${c.quantity || ''}" placeholder="0"></td>
+      </tr>`;
+  }).join('');
+
+  tbody.querySelectorAll('.qty-input').forEach((input) => {
+    input.addEventListener('change', async (e) => {
+      const skuId = Number(e.target.dataset.sku);
+      const quantity = Math.max(0, parseInt(e.target.value, 10) || 0);
+      await fetch('/api/session', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skuId, quantity }),
+      });
+    });
+  });
+}
+
+document.getElementById('importBtn').addEventListener('click', () => document.getElementById('fileInput').click());
+document.getElementById('fileInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch('/api/catalog/import', { method: 'POST', body: formData });
+  const data = await res.json();
+  if (!res.ok) {
+    alert('Import failed: ' + data.error);
+    return;
+  }
+  alert(`Imported ${data.imported} SKUs across ${data.sets.length} set(s).`);
+  e.target.value = '';
+  await loadSets();
+});
+
+document.getElementById('exportBtn').addEventListener('click', async () => {
+  const res = await fetch('/api/export', { method: 'POST' });
+  const data = await res.json();
+  if (!res.ok) {
+    alert('Export failed: ' + data.error);
+    return;
+  }
+
+  const blob = new Blob([data.csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `lorcana-listing-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  if (data.excluded.length) {
+    excludedPanel.style.display = '';
+    excludedPanel.innerHTML = `
+      <div class="excluded-panel">
+        <h3>${data.excluded.length} card(s) had a quantity but couldn't be listed<span class="badge-count">check these</span></h3>
+        <ul>${data.excluded.map((x) => `<li><b>${escapeHtml(x.productName)}</b> — ${escapeHtml(x.reason)}</li>`).join('')}</ul>
+      </div>`;
+  } else {
+    excludedPanel.style.display = 'none';
+  }
+});
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+loadSets();
+</script>
+</body>
+</html>

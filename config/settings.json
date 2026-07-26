@@ -1,0 +1,5 @@
+{
+  "listThresholdCents": 50,
+  "fetchFloorCents": 25,
+  "cacheTtlHours": 24
+}
