@@ -44,3 +44,11 @@ db.exec(`
     quantity INTEGER NOT NULL
   );
 `);
+
+// Lightweight migration: seller dump exports commonly leave "Photo URL" blank, so images are
+// instead derived from TCGCSV's own product data during pricing. Added after initial release —
+// ALTER TABLE ADD COLUMN rather than a CREATE TABLE change so existing installs pick it up too.
+const priceCacheColumns = db.prepare('PRAGMA table_info(price_cache)').all() as { name: string }[];
+if (!priceCacheColumns.some((c) => c.name === 'image_url')) {
+  db.exec('ALTER TABLE price_cache ADD COLUMN image_url TEXT');
+}

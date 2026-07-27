@@ -19,6 +19,7 @@ export interface TCGProduct {
   productId: number;
   name: string;
   cleanName?: string;
+  imageUrl?: string;
   extendedData?: ExtendedDataEntry[];
 }
 
@@ -58,14 +59,19 @@ export async function fetchPrices(groupId: number): Promise<TCGPrice[]> {
   return res.data.results ?? [];
 }
 
-/** Maps (Number, printing) -> productId for singles in a set, used to bridge catalog SKUs to TCGCSV. */
-export function buildNumberIndex(products: TCGProduct[]): Map<string, number> {
-  const index = new Map<string, number>();
+export interface NumberIndexEntry {
+  productId: number;
+  imageUrl: string | null;
+}
+
+/** Maps card Number -> {productId, imageUrl} for singles in a set, used to bridge catalog SKUs to TCGCSV. */
+export function buildNumberIndex(products: TCGProduct[]): Map<string, NumberIndexEntry> {
+  const index = new Map<string, NumberIndexEntry>();
   for (const product of products) {
     if (!extractRarity(product.extendedData)) continue; // skip sealed products
     const number = extractNumber(product.extendedData);
     if (!number) continue;
-    index.set(number, product.productId);
+    index.set(number, { productId: product.productId, imageUrl: product.imageUrl ?? null });
   }
   return index;
 }

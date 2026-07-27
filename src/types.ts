@@ -43,6 +43,7 @@ export interface PriceResult {
   salesCount: number;
   tcgcsvMarket: number | null;
   tcgcsvLow: number | null;
+  imageUrl: string | null; // from TCGCSV product data — seller dumps commonly leave "Photo URL" blank
   qualifies: boolean;       // true only if avgLast3 is based on >=3 matching sales AND avgLast3 >= listThresholdCents
   computedAt: number;       // epoch ms
 }
