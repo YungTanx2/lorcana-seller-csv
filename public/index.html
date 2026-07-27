@@ -112,7 +112,7 @@
         <input id="thresholdInput" type="number" min="0" step="0.01" value="0.50">
       </label>
       <label class="chip" style="margin-top:16px">
-        <input type="checkbox" id="noSalesCheckbox"> Show items with no sales
+        <input type="checkbox" id="thinDataCheckbox"> Show items with fewer than 3 sales
       </label>
     </div>
     <div id="progressWrap" style="display:none">
@@ -147,7 +147,7 @@ let progressBySet = new Map(); // setName -> {done, total}, merged into one comb
 let currentCards = [];         // unfiltered card list for all currently selected sets
 let activeRarities = new Set(RARITIES);
 let activePrintings = new Set(PRINTINGS);
-let showNoSales = false;
+let showThinData = false; // cards with < 3 matching sales — no trustworthy price to show
 let thresholdCents = 50;       // adjustable "min avg price" — defaults to the server's configured value
 
 const setsChips = document.getElementById('setsChips');
@@ -156,7 +156,7 @@ const rarityChips = document.getElementById('rarityChips');
 const printingChips = document.getElementById('printingChips');
 const searchInput = document.getElementById('searchInput');
 const thresholdInput = document.getElementById('thresholdInput');
-const noSalesCheckbox = document.getElementById('noSalesCheckbox');
+const thinDataCheckbox = document.getElementById('thinDataCheckbox');
 const progressWrap = document.getElementById('progressWrap');
 const progressBar = document.getElementById('progressBar');
 const progressText = document.getElementById('progressText');
@@ -179,8 +179,8 @@ function buildChips(container, values, activeSet, onToggle) {
 buildChips(rarityChips, RARITIES, activeRarities, renderTable);
 buildChips(printingChips, PRINTINGS, activePrintings, renderTable);
 searchInput.addEventListener('input', renderTable);
-noSalesCheckbox.addEventListener('change', (e) => {
-  showNoSales = e.target.checked;
+thinDataCheckbox.addEventListener('change', (e) => {
+  showThinData = e.target.checked;
   renderTable();
 });
 thresholdInput.addEventListener('input', (e) => {
@@ -292,8 +292,9 @@ function passesFilters(c) {
 
   const price = c.price;
   if (price && price.computedAt) {
-    // No sales found at all — assumed below the threshold; hidden unless the checkbox is on.
-    if (!showNoSales && price.salesCount === 0) return false;
+    // Fewer than 3 matching sales — no trustworthy price, so a price cell can't be shown either
+    // way. Hidden by default (whether 0 sales or 1-2) unless the checkbox is on.
+    if (!showThinData && price.avgLast3 === null) return false;
     // Has a real average (>=3 matching sales) — apply the adjustable price floor.
     if (price.avgLast3 !== null && price.avgLast3 * 100 < thresholdCents) return false;
   }
