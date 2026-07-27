@@ -90,9 +90,21 @@ async function priceRow(
 
   const last3 = matches.slice(0, 3);
   const avg = last3.reduce((sum, s) => sum + s.purchasePrice, 0) / 3;
-  const qualifies = avg * 100 >= settings.listThresholdCents;
 
-  return { skuId: row.skuId, avgLast3: avg, salesCount, tcgcsvMarket: market, tcgcsvLow: low, qualifies, computedAt: now };
+  // "qualifies" here means only "salesCount >= 3" (we already returned above otherwise) —
+  // whether this average clears a listing price threshold is decided later (display/export),
+  // since that threshold is user-adjustable and shouldn't require re-fetching sales to change.
+  return { skuId: row.skuId, avgLast3: avg, salesCount, tcgcsvMarket: market, tcgcsvLow: low, qualifies: true, computedAt: now };
+}
+
+/**
+ * Whether a priced SKU should be considered listable at a given threshold. Deliberately checks
+ * avgLast3 directly rather than the `qualifies` flag: avgLast3 is only ever non-null when
+ * salesCount >= 3 (in both current and any previously-cached rows), so this is robust even
+ * against cache entries written under an older meaning of `qualifies`.
+ */
+export function meetsThreshold(price: PriceResult | undefined | null, thresholdCents: number): boolean {
+  return !!price && price.avgLast3 !== null && price.avgLast3 * 100 >= thresholdCents;
 }
 
 async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (item: T, index: number) => Promise<R>, onEach?: (result: R, index: number) => void): Promise<R[]> {
