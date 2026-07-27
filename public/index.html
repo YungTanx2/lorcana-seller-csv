@@ -84,10 +84,11 @@
 
 <div class="wrap">
   <div class="panel" id="setPanel">
-    <div class="row">
-      <label class="field">Set
-        <select id="setSelect"><option value="">Loading sets…</option></select>
-      </label>
+    <div class="filters-group">
+      <div class="filters-title">Sets</div>
+      <div class="row" id="setsChips"><span class="status-text">Loading sets…</span></div>
+    </div>
+    <div class="row" style="margin-top:12px">
       <div class="filters-group">
         <div class="filters-title">Rarity</div>
         <div class="row" id="rarityChips"></div>
@@ -98,6 +99,12 @@
       </div>
       <label class="field">Search
         <input id="searchInput" type="text" placeholder="Filter by name…">
+      </label>
+      <label class="field">Min avg price ($)
+        <input id="thresholdInput" type="number" min="0" step="0.01" value="0.50">
+      </label>
+      <label class="chip" style="margin-top:16px">
+        <input type="checkbox" id="noSalesCheckbox"> Show items with no sales
       </label>
     </div>
     <div id="progressWrap" style="display:none">
@@ -125,16 +132,23 @@
 const RARITIES = ['Common','Uncommon','Rare','Super Rare','Legendary','Epic','Iconic','Enchanted'];
 const PRINTINGS = ['Normal','Cold Foil','Holofoil'];
 
-let currentSet = '';
-let currentCards = [];        // full unfiltered card list for the current set
+let allSetNames = [];          // every set name present in the catalog
+let selectedSets = new Set();  // sets currently checked in the Sets chip group
+let pricedSets = new Set();    // sets we've already kicked off a price-set stream for this session
+let progressBySet = new Map(); // setName -> {done, total}, merged into one combined progress bar
+let currentCards = [];         // unfiltered card list for all currently selected sets
 let activeRarities = new Set(RARITIES);
 let activePrintings = new Set(PRINTINGS);
+let showNoSales = false;
+let thresholdCents = 50;       // adjustable "min avg price" — defaults to the server's configured value
 
-const setSelect = document.getElementById('setSelect');
+const setsChips = document.getElementById('setsChips');
 const tbody = document.getElementById('tbody');
 const rarityChips = document.getElementById('rarityChips');
 const printingChips = document.getElementById('printingChips');
 const searchInput = document.getElementById('searchInput');
+const thresholdInput = document.getElementById('thresholdInput');
+const noSalesCheckbox = document.getElementById('noSalesCheckbox');
 const progressWrap = document.getElementById('progressWrap');
 const progressBar = document.getElementById('progressBar');
 const progressText = document.getElementById('progressText');
@@ -145,7 +159,7 @@ function buildChips(container, values, activeSet, onToggle) {
   for (const v of values) {
     const label = document.createElement('label');
     label.className = 'chip' + (activeSet.has(v) ? '' : ' off');
-    label.innerHTML = `<input type="checkbox" ${activeSet.has(v) ? 'checked' : ''}> ${v}`;
+    label.innerHTML = `<input type="checkbox" ${activeSet.has(v) ? 'checked' : ''}> ${escapeHtml(v)}`;
     label.querySelector('input').addEventListener('change', (e) => {
       if (e.target.checked) activeSet.add(v); else activeSet.delete(v);
       label.classList.toggle('off', !e.target.checked);
@@ -157,68 +171,129 @@ function buildChips(container, values, activeSet, onToggle) {
 buildChips(rarityChips, RARITIES, activeRarities, renderTable);
 buildChips(printingChips, PRINTINGS, activePrintings, renderTable);
 searchInput.addEventListener('input', renderTable);
+noSalesCheckbox.addEventListener('change', (e) => {
+  showNoSales = e.target.checked;
+  renderTable();
+});
+thresholdInput.addEventListener('input', (e) => {
+  const dollars = parseFloat(e.target.value);
+  thresholdCents = Number.isFinite(dollars) && dollars >= 0 ? Math.round(dollars * 100) : 50;
+  renderTable();
+});
+
+async function loadSettings() {
+  const settings = await (await fetch('/api/settings')).json();
+  thresholdCents = settings.listThresholdCents;
+  thresholdInput.value = (thresholdCents / 100).toFixed(2);
+  renderTable(); // in case cards already loaded (race with loadSets) using the hardcoded default
+}
 
 async function loadSets() {
-  const sets = await (await fetch('/api/sets')).json();
-  setSelect.innerHTML = sets.length
-    ? sets.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('')
-    : '<option value="">No sets imported yet</option>';
-  if (sets.length) {
-    currentSet = sets[0];
-    setSelect.value = currentSet;
-    await loadSetCards();
+  allSetNames = await (await fetch('/api/sets')).json();
+  if (allSetNames.length === 0) {
+    setsChips.innerHTML = '<span class="status-text">No sets imported yet.</span>';
+    return;
+  }
+  selectedSets = new Set([allSetNames[0]]); // default: just the first set, to avoid pricing everything at once
+  buildSetsChips();
+  await loadCardsForSelectedSets();
+}
+
+function buildSetsChips() {
+  setsChips.innerHTML = '';
+  for (const v of allSetNames) {
+    const label = document.createElement('label');
+    label.className = 'chip' + (selectedSets.has(v) ? '' : ' off');
+    label.innerHTML = `<input type="checkbox" ${selectedSets.has(v) ? 'checked' : ''}> ${escapeHtml(v)}`;
+    label.querySelector('input').addEventListener('change', async (e) => {
+      if (e.target.checked) selectedSets.add(v); else selectedSets.delete(v);
+      label.classList.toggle('off', !e.target.checked);
+      await loadCardsForSelectedSets();
+    });
+    setsChips.appendChild(label);
   }
 }
 
-setSelect.addEventListener('change', async () => {
-  currentSet = setSelect.value;
-  if (currentSet) await loadSetCards();
-});
-
-async function loadSetCards() {
-  const res = await fetch(`/api/cards?set=${encodeURIComponent(currentSet)}`);
+async function loadCardsForSelectedSets() {
+  if (selectedSets.size === 0) {
+    currentCards = [];
+    renderTable();
+    return;
+  }
+  const setsParam = [...selectedSets].join(',');
+  const res = await fetch(`/api/cards?sets=${encodeURIComponent(setsParam)}`);
   currentCards = await res.json();
   renderTable();
-  streamPricing();
+
+  // Kick off pricing for any selected set we haven't primed yet this session.
+  for (const setName of selectedSets) {
+    if (!pricedSets.has(setName)) {
+      pricedSets.add(setName);
+      streamPricingForSet(setName);
+    }
+  }
 }
 
-function streamPricing() {
+function updateCombinedProgress() {
+  let total = 0, done = 0;
+  for (const p of progressBySet.values()) { total += p.total; done += p.done; }
+  if (progressBySet.size === 0) {
+    progressWrap.style.display = 'none';
+    return;
+  }
   progressWrap.style.display = '';
-  progressBar.style.width = '0%';
-  progressText.textContent = 'Checking prices…';
+  const pct = total ? Math.round((done / total) * 100) : 100;
+  progressBar.style.width = pct + '%';
+  progressText.textContent = `Pricing ${done}/${total} across ${progressBySet.size} set(s)…`;
+}
 
-  const src = new EventSource(`/api/price-set?set=${encodeURIComponent(currentSet)}`);
+function streamPricingForSet(setName) {
+  progressBySet.set(setName, { done: 0, total: 0 });
+  updateCombinedProgress();
+
+  const src = new EventSource(`/api/price-set?set=${encodeURIComponent(setName)}`);
   src.onmessage = async (event) => {
     const msg = JSON.parse(event.data);
     if (msg.type === 'start') {
-      progressText.textContent = `Pricing ${msg.total} cards…`;
+      progressBySet.set(setName, { done: 0, total: msg.total });
+      updateCombinedProgress();
     } else if (msg.type === 'progress') {
-      const pct = msg.total ? Math.round((msg.done / msg.total) * 100) : 100;
-      progressBar.style.width = pct + '%';
-      progressText.textContent = `Pricing ${msg.done}/${msg.total}…`;
+      progressBySet.set(setName, { done: msg.done, total: msg.total });
+      updateCombinedProgress();
     } else if (msg.type === 'done') {
-      progressText.textContent = 'Prices up to date.';
-      progressBar.style.width = '100%';
+      progressBySet.delete(setName);
+      updateCombinedProgress();
       src.close();
-      const res = await fetch(`/api/cards?set=${encodeURIComponent(currentSet)}`);
-      currentCards = await res.json();
-      renderTable();
-      setTimeout(() => { progressWrap.style.display = 'none'; }, 1500);
+      if (selectedSets.has(setName)) await loadCardsForSelectedSets();
     } else if (msg.type === 'error') {
-      progressText.textContent = 'Error: ' + msg.message;
+      console.error(`Pricing failed for ${setName}:`, msg.message);
+      progressBySet.delete(setName);
+      updateCombinedProgress();
       src.close();
     }
   };
-  src.onerror = () => { progressText.textContent = 'Connection lost.'; src.close(); };
+  src.onerror = () => { progressBySet.delete(setName); updateCombinedProgress(); src.close(); };
+}
+
+function passesFilters(c) {
+  if (!activeRarities.has(c.rarity)) return false;
+  if (!activePrintings.has(c.printing)) return false;
+
+  const q = searchInput.value.trim().toLowerCase();
+  if (q && !c.productName.toLowerCase().includes(q)) return false;
+
+  const price = c.price;
+  if (price && price.computedAt) {
+    // No sales found at all — assumed below the threshold; hidden unless the checkbox is on.
+    if (!showNoSales && price.salesCount === 0) return false;
+    // Has a real average (>=3 matching sales) — apply the adjustable price floor.
+    if (price.avgLast3 !== null && price.avgLast3 * 100 < thresholdCents) return false;
+  }
+  return true;
 }
 
 function renderTable() {
-  const q = searchInput.value.trim().toLowerCase();
-  const rows = currentCards.filter((c) =>
-    activeRarities.has(c.rarity) &&
-    activePrintings.has(c.printing) &&
-    (!q || c.productName.toLowerCase().includes(q))
-  );
+  const rows = currentCards.filter(passesFilters);
 
   if (rows.length === 0) {
     tbody.innerHTML = '<tr><td colspan="8" class="empty">No cards match the current filters.</td></tr>';
@@ -228,11 +303,11 @@ function renderTable() {
   tbody.innerHTML = rows.map((c) => {
     const price = c.price;
     let priceCell, salesCell;
-    if (price && price.qualifies) {
+    if (price && price.avgLast3 !== null) {
       priceCell = `<span class="price-ok">$${price.avgLast3.toFixed(2)}</span>`;
       salesCell = `<span class="sales-n">${price.salesCount} sales</span>`;
     } else if (price && price.computedAt) {
-      priceCell = `<span class="price-bad">not listed</span>`;
+      priceCell = `<span class="price-bad">${price.salesCount === 0 ? 'no sales' : 'insufficient data'}</span>`;
       salesCell = `<span class="sales-n">${price.salesCount || 0} sales</span>`;
     } else {
       priceCell = `<span class="price-bad">—</span>`;
@@ -282,7 +357,11 @@ document.getElementById('fileInput').addEventListener('change', async (e) => {
 });
 
 document.getElementById('exportBtn').addEventListener('click', async () => {
-  const res = await fetch('/api/export', { method: 'POST' });
+  const res = await fetch('/api/export', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ thresholdCents }),
+  });
   const data = await res.json();
   if (!res.ok) {
     alert('Export failed: ' + data.error);
@@ -313,6 +392,7 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+loadSettings();
 loadSets();
 </script>
 </body>

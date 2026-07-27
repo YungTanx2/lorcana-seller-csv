@@ -1,5 +1,5 @@
 import { stringifyCsvRow } from './csv';
-import { getSettings } from './pricing';
+import { getSettings, meetsThreshold } from './pricing';
 import { CatalogRow, PriceResult } from './types';
 
 // Verbatim header from a real TCGplayer Seller Portal "Pricing" export — column order matters for import.
@@ -21,28 +21,29 @@ export interface ExcludedCard {
   reason: string;
 }
 
-function exclusionReason(price: PriceResult | undefined): string {
+function exclusionReason(price: PriceResult | undefined, thresholdCents: number): string {
   const settings = getSettings();
   if (!price) return 'not yet priced';
   if (price.tcgcsvMarket === null) return 'no matching TCGCSV product (card number/printing mismatch)';
-  if (price.tcgcsvMarket * 100 < settings.fetchFloorCents) return `TCGCSV market below ${(settings.fetchFloorCents / 100).toFixed(2)} fetch floor`;
+  if (price.tcgcsvMarket * 100 < settings.fetchFloorCents) return `TCGCSV market below $${(settings.fetchFloorCents / 100).toFixed(2)} fetch floor — never checked for sales`;
+  if (price.salesCount === 0) return 'no matching sales found in the last 30 days';
   if (price.salesCount < 3) return `only ${price.salesCount} matching sale${price.salesCount === 1 ? '' : 's'} (need 3)`;
-  if (price.avgLast3 !== null && price.avgLast3 * 100 < settings.listThresholdCents) {
-    return `avg last 3 sold ($${price.avgLast3.toFixed(2)}) below ${(settings.listThresholdCents / 100).toFixed(2)} list threshold`;
+  if (price.avgLast3 !== null && price.avgLast3 * 100 < thresholdCents) {
+    return `avg last 3 sold ($${price.avgLast3.toFixed(2)}) below $${(thresholdCents / 100).toFixed(2)} list threshold`;
   }
   return 'does not qualify';
 }
 
-/** Builds the seller CSV from priced, quantity>0 rows. Rows that don't qualify are reported, not silently dropped. */
-export function buildExportCsv(items: ExportItem[]): { csv: string; excluded: ExcludedCard[] } {
+/** Builds the seller CSV from priced, quantity>0 rows. Rows that don't clear the threshold are reported, not silently dropped. */
+export function buildExportCsv(items: ExportItem[], thresholdCents: number): { csv: string; excluded: ExcludedCard[] } {
   const lines = [stringifyCsvRow(HEADER)];
   const excluded: ExcludedCard[] = [];
 
   for (const { row, price, quantity } of items) {
     if (quantity <= 0) continue;
 
-    if (!price?.qualifies) {
-      excluded.push({ skuId: row.skuId, productName: row.productName, reason: exclusionReason(price) });
+    if (!meetsThreshold(price, thresholdCents)) {
+      excluded.push({ skuId: row.skuId, productName: row.productName, reason: exclusionReason(price, thresholdCents) });
       continue;
     }
 
@@ -55,13 +56,13 @@ export function buildExportCsv(items: ExportItem[]): { csv: string; excluded: Ex
       row.number,
       row.rarity,
       row.condition,
-      price.avgLast3!.toFixed(2),   // TCG Market Price
+      price!.avgLast3!.toFixed(2),   // TCG Market Price
       '',                            // TCG Direct Low — no public source
       '',                            // TCG Low Price With Shipping — no public source
-      price.tcgcsvLow ?? '',         // TCG Low Price
+      price!.tcgcsvLow ?? '',        // TCG Low Price
       0,                              // Total Quantity
       quantity,                       // Add to Quantity
-      price.avgLast3!.toFixed(2),   // TCG Marketplace Price — the real listing price
+      price!.avgLast3!.toFixed(2),   // TCG Marketplace Price — the real listing price
       row.photoUrl,
     ]));
   }

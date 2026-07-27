@@ -97,8 +97,10 @@ interface CardFilters {
   printings?: string[];
 }
 
-/** Catalog rows for a set, joined with cached pricing + saved quantity, ready for the UI table. */
-export function getCardsForSet(setName: string, filters: CardFilters = {}): CardView[] {
+/** Catalog rows for one or more sets, joined with cached pricing + saved quantity, ready for the UI table. */
+export function getCardsForSets(setNames: string[], filters: CardFilters = {}): CardView[] {
+  if (setNames.length === 0) return [];
+
   let sql = `
     SELECT c.sku_id, c.product_line, c.set_name, c.product_name, c.number, c.rarity,
            c.condition, c.printing, c.photo_url,
@@ -107,9 +109,9 @@ export function getCardsForSet(setName: string, filters: CardFilters = {}): Card
     FROM catalog c
     LEFT JOIN price_cache p ON p.sku_id = c.sku_id
     LEFT JOIN session s ON s.sku_id = c.sku_id
-    WHERE c.set_name = ?
+    WHERE c.set_name IN (${setNames.map(() => '?').join(',')})
   `;
-  const params: unknown[] = [setName];
+  const params: unknown[] = [...setNames];
 
   if (filters.rarities?.length) {
     sql += ` AND c.rarity IN (${filters.rarities.map(() => '?').join(',')})`;

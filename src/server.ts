@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import path from 'path';
-import { parseSellerDump, upsertCatalogRows, getSetNames, getCardsForSet, getCatalogRowsBySkuIds, CatalogImportError } from './catalog';
+import { parseSellerDump, upsertCatalogRows, getSetNames, getCardsForSets, getCatalogRowsBySkuIds, CatalogImportError } from './catalog';
 import { priceSet, repriceForExport, getSettings } from './pricing';
 import { setQuantity, getAllQuantities } from './session';
 import { buildExportCsv } from './export';
@@ -47,12 +47,12 @@ function parseListParam(value: unknown): string[] | undefined {
 }
 
 app.get('/api/cards', (req, res) => {
-  const setName = req.query.set as string | undefined;
-  if (!setName) {
-    res.status(400).json({ error: 'Missing required "set" query parameter.' });
+  const setNames = parseListParam(req.query.sets);
+  if (!setNames || setNames.length === 0) {
+    res.status(400).json({ error: 'Missing required "sets" query parameter.' });
     return;
   }
-  const cards = getCardsForSet(setName, {
+  const cards = getCardsForSets(setNames, {
     rarities: parseListParam(req.query.rarities),
     printings: parseListParam(req.query.printings),
   });
@@ -75,7 +75,7 @@ app.get('/api/price-set', async (req, res) => {
   }
 
   try {
-    const rows = getCardsForSet(setName); // unfiltered — price the whole set once regardless of UI filters
+    const rows = getCardsForSets([setName]); // unfiltered — price the whole set once regardless of UI filters
     send({ type: 'start', total: rows.length });
 
     await priceSet(setName, rows, {
@@ -104,13 +104,19 @@ app.put('/api/session', (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/export', async (_req, res) => {
+app.post('/api/export', async (req, res) => {
   try {
     const quantities = getAllQuantities();
     if (quantities.length === 0) {
       res.status(400).json({ error: 'No quantities set — nothing to export.' });
       return;
     }
+
+    // Threshold is user-adjustable in the UI; falls back to the configured default (50 cents).
+    const requestedThreshold = req.body?.thresholdCents;
+    const thresholdCents = typeof requestedThreshold === 'number' && requestedThreshold >= 0
+      ? requestedThreshold
+      : getSettings().listThresholdCents;
 
     const skuIds = quantities.map((q) => q.skuId);
     const rows = getCatalogRowsBySkuIds(skuIds);
@@ -123,7 +129,7 @@ app.post('/api/export', async (_req, res) => {
       .map((q) => ({ row: rowBySkuId.get(q.skuId), price: prices.get(q.skuId), quantity: q.quantity }))
       .filter((item): item is { row: NonNullable<typeof item.row>; price: typeof item.price; quantity: number } => !!item.row);
 
-    const { csv, excluded } = buildExportCsv(items);
+    const { csv, excluded } = buildExportCsv(items, thresholdCents);
     res.json({ csv, excluded });
   } catch (err) {
     console.error('[export]', err);
