@@ -120,7 +120,7 @@ export function getCardsForSets(setNames: string[], filters: CardFilters = {}): 
   let sql = `
     SELECT c.sku_id, c.product_line, c.set_name, c.product_name, c.number, c.rarity,
            c.condition, c.printing, c.photo_url,
-           p.avg_last3, p.sales_count, p.tcgcsv_market, p.tcgcsv_low, p.qualifies, p.computed_at,
+           p.avg_last3, p.sales_count, p.tcgcsv_market, p.tcgcsv_low, p.image_url, p.qualifies, p.computed_at,
            s.quantity
     FROM catalog c
     LEFT JOIN price_cache p ON p.sku_id = c.sku_id
@@ -157,6 +157,7 @@ export function getCardsForSets(setNames: string[], filters: CardFilters = {}): 
       salesCount: row.sales_count,
       tcgcsvMarket: row.tcgcsv_market,
       tcgcsvLow: row.tcgcsv_low,
+      imageUrl: row.image_url,
       qualifies: !!row.qualifies,
       computedAt: row.computed_at,
     },
