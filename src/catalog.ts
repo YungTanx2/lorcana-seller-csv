@@ -1,5 +1,6 @@
 import { db } from './db';
 import { parseCsv } from './csv';
+import { SUPPORTED_SETS } from './sets';
 import { CardView, CatalogRow, Printing } from './types';
 
 const REQUIRED_COLUMNS = [
@@ -87,9 +88,24 @@ export function upsertCatalogRows(rows: CatalogRow[]): { imported: number; sets:
   return { imported: rows.length, sets };
 }
 
+const SET_NUMBER_BY_NAME = new Map(SUPPORTED_SETS.map((s) => [s.name, s.setNumber]));
+
+/**
+ * Set names present in the catalog, ordered by release date (SUPPORTED_SETS.setNumber).
+ * Seller dumps can include sets outside our curated registry (promos, Illumineer's Quest
+ * side-products) — those have no release order, so they're sorted alphabetically after
+ * every known mainline set rather than being dropped.
+ */
 export function getSetNames(): string[] {
-  const rows = db.prepare('SELECT DISTINCT set_name FROM catalog ORDER BY set_name').all() as { set_name: string }[];
-  return rows.map((r) => r.set_name);
+  const rows = db.prepare('SELECT DISTINCT set_name FROM catalog').all() as { set_name: string }[];
+  return rows
+    .map((r) => r.set_name)
+    .sort((a, b) => {
+      const na = SET_NUMBER_BY_NAME.get(a) ?? Infinity;
+      const nb = SET_NUMBER_BY_NAME.get(b) ?? Infinity;
+      if (na !== nb) return na - nb;
+      return a.localeCompare(b);
+    });
 }
 
 interface CardFilters {
