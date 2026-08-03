@@ -129,8 +129,8 @@ app.post('/api/export', async (req, res) => {
       .map((q) => ({ row: rowBySkuId.get(q.skuId), price: prices.get(q.skuId), quantity: q.quantity }))
       .filter((item): item is { row: NonNullable<typeof item.row>; price: typeof item.price; quantity: number } => !!item.row);
 
-    const { csv, excluded } = buildExportCsv(items, thresholdCents);
-    res.json({ csv, excluded });
+    const { csv, excluded, marketFallback } = buildExportCsv(items, thresholdCents);
+    res.json({ csv, excluded, marketFallback });
   } catch (err) {
     console.error('[export]', err);
     res.status(500).json({ error: 'Export failed.' });

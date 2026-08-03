@@ -4,7 +4,7 @@ import { db } from './db';
 import { fetchProducts, fetchPrices, buildNumberIndex, buildPriceMap, priceKey, TCGPrice, NumberIndexEntry } from './tcgcsv';
 import { fetchSales } from './latestsales';
 import { findSetByName } from './sets';
-import { CatalogRow, PriceResult, Settings } from './types';
+import { CatalogRow, PriceResult, PriceSource, Settings } from './types';
 
 let settingsCache: Settings | null = null;
 
@@ -56,7 +56,7 @@ async function priceRow(
   numberIndex: Map<string, NumberIndexEntry>,
   priceMap: Map<string, TCGPrice>,
   settings: Settings,
-): Promise<PriceResult> {
+): Promise<PriceResult | null> {
   const now = Date.now();
   const entry = numberIndex.get(row.number);
 
@@ -79,7 +79,11 @@ async function priceRow(
   try {
     sales = await fetchSales(productId);
   } catch {
-    return { skuId: row.skuId, avgLast3: null, salesCount: 0, tcgcsvMarket: market, tcgcsvLow: low, imageUrl, qualifies: false, computedAt: now };
+    // The fetch itself failed (timeout, bot-block, network error) — this is NOT the same as
+    // "this card has no sales" and must not be cached as one. Returning null tells priceSet to
+    // skip the cache write entirely, so the row is retried on the next run instead of being
+    // stuck showing a false zero for a full cacheTtlHours.
+    return null;
   }
 
   // Sales come back newest-first; filter to the exact SKU (printing + Near Mint) before averaging.
@@ -101,13 +105,31 @@ async function priceRow(
 }
 
 /**
- * Whether a priced SKU should be considered listable at a given threshold. Deliberately checks
- * avgLast3 directly rather than the `qualifies` flag: avgLast3 is only ever non-null when
- * salesCount >= 3 (in both current and any previously-cached rows), so this is robust even
- * against cache entries written under an older meaning of `qualifies`.
+ * Resolves the number a card is actually priced/listed at: a real sold average when >=3
+ * matching sales exist, else TCGCSV's market price as a labeled fallback (never blended with
+ * a real average — `source` tells the caller which one it got), else no price at all.
+ *
+ * A card only ever reaches the `avgLast3 === null` branch here if it survived the fetch-floor
+ * gate in priceRow (i.e. latestsales was actually called) and came up short on real matches —
+ * cards excluded before that gate carry `tcgcsvMarket: null` too and resolve to no price,
+ * unchanged from today.
+ */
+export function resolvePrice(price: PriceResult | undefined | null): { listPrice: number | null; source: PriceSource } {
+  if (!price) return { listPrice: null, source: null };
+  if (price.avgLast3 !== null) return { listPrice: price.avgLast3, source: 'sold' };
+  if (price.tcgcsvMarket !== null) return { listPrice: price.tcgcsvMarket, source: 'market' };
+  return { listPrice: null, source: null };
+}
+
+/**
+ * Whether a priced SKU should be considered listable at a given threshold. Checks the resolved
+ * list price (sold average, or market-price fallback — see resolvePrice) rather than the
+ * `qualifies` flag, so this is robust even against cache entries written under an older meaning
+ * of `qualifies`.
  */
 export function meetsThreshold(price: PriceResult | undefined | null, thresholdCents: number): boolean {
-  return !!price && price.avgLast3 !== null && price.avgLast3 * 100 >= thresholdCents;
+  const { listPrice } = resolvePrice(price);
+  return listPrice !== null && listPrice * 100 >= thresholdCents;
 }
 
 async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (item: T, index: number) => Promise<R>, onEach?: (result: R, index: number) => void): Promise<R[]> {
@@ -165,10 +187,10 @@ export async function priceSet(
   const priceMap = buildPriceMap(prices);
 
   let done = 0;
-  await mapWithConcurrency(toPrice, 8, (row) => priceRow(row, numberIndex, priceMap, settings), (result) => {
-    cacheResult(result);
+  await mapWithConcurrency(toPrice, 8, (row) => priceRow(row, numberIndex, priceMap, settings), (result, i) => {
+    if (result) cacheResult(result); // null = fetch failed; don't poison the cache with a false "no sales"
     done++;
-    opts.onProgress?.({ total: toPrice.length, done, skuId: result.skuId });
+    opts.onProgress?.({ total: toPrice.length, done, skuId: result ? result.skuId : toPrice[i].skuId });
   });
 }
 

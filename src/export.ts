@@ -1,5 +1,5 @@
 import { stringifyCsvRow } from './csv';
-import { getSettings, meetsThreshold } from './pricing';
+import { getSettings, meetsThreshold, resolvePrice } from './pricing';
 import { CatalogRow, PriceResult } from './types';
 
 // Verbatim header from a real TCGplayer Seller Portal "Pricing" export — column order matters for import.
@@ -26,18 +26,34 @@ function exclusionReason(price: PriceResult | undefined, thresholdCents: number)
   if (!price) return 'not yet priced';
   if (price.tcgcsvMarket === null) return 'no matching TCGCSV product (card number/printing mismatch)';
   if (price.tcgcsvMarket * 100 < settings.fetchFloorCents) return `TCGCSV market below $${(settings.fetchFloorCents / 100).toFixed(2)} fetch floor — never checked for sales`;
-  if (price.salesCount === 0) return 'no matching sales found in the last 30 days';
-  if (price.salesCount < 3) return `only ${price.salesCount} matching sale${price.salesCount === 1 ? '' : 's'} (need 3)`;
-  if (price.avgLast3 !== null && price.avgLast3 * 100 < thresholdCents) {
-    return `avg last 3 sold ($${price.avgLast3.toFixed(2)}) below $${(thresholdCents / 100).toFixed(2)} list threshold`;
-  }
-  return 'does not qualify';
+
+  // Past this point tcgcsvMarket is known, so resolvePrice always has a fallback to offer —
+  // a card only lands here because ITS resolved price (sold average, or market estimate when
+  // sales were thin) is still below the list threshold, not because it has "no price" at all.
+  const { listPrice, source } = resolvePrice(price);
+  if (listPrice === null) return 'no matching sales found in the last 30 days'; // defensive — shouldn't be reachable once tcgcsvMarket passed the floor check
+  const priced = source === 'sold'
+    ? `avg last 3 sold ($${listPrice.toFixed(2)})`
+    : `TCGCSV market estimate ($${listPrice.toFixed(2)}) — only ${price.salesCount} real sale${price.salesCount === 1 ? '' : 's'} found`;
+  return `${priced} below $${(thresholdCents / 100).toFixed(2)} list threshold`;
 }
 
-/** Builds the seller CSV from priced, quantity>0 rows. Rows that don't clear the threshold are reported, not silently dropped. */
-export function buildExportCsv(items: ExportItem[], thresholdCents: number): { csv: string; excluded: ExcludedCard[] } {
+export interface MarketFallbackCard {
+  skuId: number;
+  productName: string;
+  listPrice: number;
+}
+
+/**
+ * Builds the seller CSV from priced, quantity>0 rows. Rows that don't clear the threshold are
+ * reported, not silently dropped. The Seller Portal import format is a fixed 16-column header
+ * (above) — there's no room in the CSV itself to flag which rows used a market-price estimate
+ * instead of a real sold average, so that travels back separately as `marketFallback`.
+ */
+export function buildExportCsv(items: ExportItem[], thresholdCents: number): { csv: string; excluded: ExcludedCard[]; marketFallback: MarketFallbackCard[] } {
   const lines = [stringifyCsvRow(HEADER)];
   const excluded: ExcludedCard[] = [];
+  const marketFallback: MarketFallbackCard[] = [];
 
   for (const { row, price, quantity } of items) {
     if (quantity <= 0) continue;
@@ -45,6 +61,12 @@ export function buildExportCsv(items: ExportItem[], thresholdCents: number): { c
     if (!meetsThreshold(price, thresholdCents)) {
       excluded.push({ skuId: row.skuId, productName: row.productName, reason: exclusionReason(price, thresholdCents) });
       continue;
+    }
+
+    const { listPrice, source } = resolvePrice(price);
+    const priceStr = listPrice!.toFixed(2);
+    if (source === 'market') {
+      marketFallback.push({ skuId: row.skuId, productName: row.productName, listPrice: listPrice! });
     }
 
     lines.push(stringifyCsvRow([
@@ -56,16 +78,16 @@ export function buildExportCsv(items: ExportItem[], thresholdCents: number): { c
       row.number,
       row.rarity,
       row.condition,
-      price!.avgLast3!.toFixed(2),   // TCG Market Price
+      priceStr,                      // TCG Market Price
       '',                            // TCG Direct Low — no public source
       '',                            // TCG Low Price With Shipping — no public source
       price!.tcgcsvLow ?? '',        // TCG Low Price
       0,                              // Total Quantity
       quantity,                       // Add to Quantity
-      price!.avgLast3!.toFixed(2),   // TCG Marketplace Price — the real listing price
+      priceStr,                      // TCG Marketplace Price — the real listing price
       row.photoUrl,
     ]));
   }
 
-  return { csv: lines.join('\r\n') + '\r\n', excluded };
+  return { csv: lines.join('\r\n') + '\r\n', excluded, marketFallback };
 }
