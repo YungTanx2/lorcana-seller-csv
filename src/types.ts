@@ -48,6 +48,13 @@ export interface PriceResult {
   computedAt: number;       // epoch ms
 }
 
+/**
+ * Which number a card is actually priced/listed at, resolved from a PriceResult:
+ * a real sold average when >=3 matching sales exist, else TCGCSV's market price as a labeled
+ * fallback, else no price at all. See pricing.ts::resolvePrice — the only place this is computed.
+ */
+export type PriceSource = 'sold' | 'market' | null;
+
 /** A catalog row joined with its latest price info, as served to the frontend. */
 export interface CardView extends CatalogRow {
   price: PriceResult | null;

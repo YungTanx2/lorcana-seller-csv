@@ -46,6 +46,7 @@
   .cname { font-weight: 600; }
   .printing-badge { font-size: .68rem; padding: 2px 7px; border-radius: 999px; background: #23303d; color: #9fb3c2; }
   .price-ok { color: #6ee7a8; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .price-est { color: #f0b26b; font-weight: 700; font-variant-numeric: tabular-nums; }
   .price-bad { color: #6b7d8c; font-size: .78rem; }
   .sales-n { color: #7d90a0; font-size: .74rem; }
   .progress-wrap { height: 6px; background: #0f1720; border-radius: 999px; overflow: hidden; margin-top: 8px; }
@@ -56,6 +57,9 @@
   .excluded-panel { background: #241a12; border: 1px solid #4a3018; border-radius: 10px; padding: 14px 16px; margin-top: 14px; }
   .excluded-panel h3 { margin: 0 0 8px; font-size: .9rem; color: #f0b26b; }
   .excluded-panel li { font-size: .82rem; margin-bottom: 3px; }
+  .marketfallback-panel { background: #142433; border: 1px solid #1f3a52; border-radius: 10px; padding: 14px 16px; margin-top: 14px; }
+  .marketfallback-panel h3 { margin: 0 0 8px; font-size: .9rem; color: #6cc7ff; }
+  .marketfallback-panel li { font-size: .82rem; margin-bottom: 3px; }
   .badge-count { background: #1f6feb; color: #fff; border-radius: 999px; font-size: .7rem; padding: 1px 7px; margin-left: 4px; }
   @media (prefers-color-scheme: light) {
     body { background: #f7f9fb; color: #1a2530; }
@@ -72,8 +76,10 @@
     .letter-row td { background: #f7f9fb; } tbody tr.letter-row:hover { background: #f7f9fb; }
     .letter-badge { color: #1f7fc0; } .letter-count { color: #5a6b78; }
     .price-ok { color: #12905a; }
+    .price-est { color: #b5710a; }
     .tablewrap { border-color: #dae3ea; }
     .excluded-panel { background: #fff3e6; border-color: #f0c896; }
+    .marketfallback-panel { background: #eaf2f9; border-color: #bcd9f0; }
   }
 </style>
 </head>
@@ -81,7 +87,7 @@
 <header>
   <div>
     <h1>Lorcana Seller CSV Builder</h1>
-    <div class="sub">Browse sets, price by avg of last 3 sold, export a TCGplayer Seller Portal inventory CSV</div>
+    <div class="sub">Browse sets, price by avg of last 3 sold (or a labeled TCGCSV market estimate when sales are thin), export a TCGplayer Seller Portal inventory CSV</div>
   </div>
   <div class="row">
     <button id="importBtn">Import seller dump…</button>
@@ -112,7 +118,7 @@
         <input id="thresholdInput" type="number" min="0" step="0.01" value="0.50">
       </label>
       <label class="chip" style="margin-top:16px">
-        <input type="checkbox" id="thinDataCheckbox"> Show items with fewer than 3 sales
+        <input type="checkbox" id="thinDataCheckbox"> Show items with no price at all
       </label>
     </div>
     <div id="progressWrap" style="display:none">
@@ -133,6 +139,7 @@
     </table>
   </div>
 
+  <div id="marketFallbackPanel" style="display:none"></div>
   <div id="excludedPanel" style="display:none"></div>
 </div>
 
@@ -161,6 +168,16 @@ const progressWrap = document.getElementById('progressWrap');
 const progressBar = document.getElementById('progressBar');
 const progressText = document.getElementById('progressText');
 const excludedPanel = document.getElementById('excludedPanel');
+const marketFallbackPanel = document.getElementById('marketFallbackPanel');
+
+// Mirrors pricing.ts::resolvePrice — a real sold average when >=3 matching sales exist,
+// else TCGCSV's market price as a labeled fallback, else no price at all. Never blended.
+function resolvePrice(price) {
+  if (!price) return { listPrice: null, source: null };
+  if (price.avgLast3 !== null) return { listPrice: price.avgLast3, source: 'sold' };
+  if (price.tcgcsvMarket !== null) return { listPrice: price.tcgcsvMarket, source: 'market' };
+  return { listPrice: null, source: null };
+}
 
 function buildChips(container, values, activeSet, onToggle) {
   container.innerHTML = '';
@@ -292,11 +309,13 @@ function passesFilters(c) {
 
   const price = c.price;
   if (price && price.computedAt) {
-    // Fewer than 3 matching sales — no trustworthy price, so a price cell can't be shown either
-    // way. Hidden by default (whether 0 sales or 1-2) unless the checkbox is on.
-    if (!showThinData && price.avgLast3 === null) return false;
-    // Has a real average (>=3 matching sales) — apply the adjustable price floor.
-    if (price.avgLast3 !== null && price.avgLast3 * 100 < thresholdCents) return false;
+    const { listPrice } = resolvePrice(price);
+    // No price at all — neither a real sold average nor a TCGCSV market estimate exists
+    // (no catalog match, or below the fetch floor). Hidden by default unless the checkbox is on.
+    if (!showThinData && listPrice === null) return false;
+    // Has a resolved price (sold average, or market estimate when sales were thin) — apply
+    // the adjustable price floor.
+    if (listPrice !== null && listPrice * 100 < thresholdCents) return false;
   }
   return true;
 }
@@ -333,13 +352,17 @@ function renderTable() {
     }
 
     const price = c.price;
+    const { listPrice, source } = resolvePrice(price);
     let priceCell, salesCell;
-    if (price && price.avgLast3 !== null) {
-      priceCell = `<span class="price-ok">$${price.avgLast3.toFixed(2)}</span>`;
+    if (source === 'sold') {
+      priceCell = `<span class="price-ok">$${listPrice.toFixed(2)}</span>`;
       salesCell = `<span class="sales-n">${price.salesCount} sales</span>`;
+    } else if (source === 'market') {
+      priceCell = `<span class="price-est">$${listPrice.toFixed(2)} (est.)</span>`;
+      salesCell = `<span class="sales-n">${price.salesCount} sale${price.salesCount === 1 ? '' : 's'}</span>`;
     } else if (price && price.computedAt) {
-      priceCell = `<span class="price-bad">${price.salesCount === 0 ? 'no sales' : 'insufficient data'}</span>`;
-      salesCell = `<span class="sales-n">${price.salesCount || 0} sales</span>`;
+      priceCell = `<span class="price-bad">no price</span>`;
+      salesCell = `<span class="sales-n">0 sales</span>`;
     } else {
       priceCell = `<span class="price-bad">—</span>`;
       salesCell = '';
@@ -414,6 +437,17 @@ document.getElementById('exportBtn').addEventListener('click', async () => {
   a.download = `lorcana-listing-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
+
+  if (data.marketFallback && data.marketFallback.length) {
+    marketFallbackPanel.style.display = '';
+    marketFallbackPanel.innerHTML = `
+      <div class="marketfallback-panel">
+        <h3>${data.marketFallback.length} card(s) priced off TCGCSV market estimate, not a real sale<span class="badge-count">review before uploading</span></h3>
+        <ul>${data.marketFallback.map((x) => `<li><b>${escapeHtml(x.productName)}</b> — $${x.listPrice.toFixed(2)} (est.)</li>`).join('')}</ul>
+      </div>`;
+  } else {
+    marketFallbackPanel.style.display = 'none';
+  }
 
   if (data.excluded.length) {
     excludedPanel.style.display = '';
